@@ -1,0 +1,120 @@
+##
+# @file   setup.py.in
+# @author Xu Li
+# @date   10 2024
+# @brief  For CMake to generate setup.py file
+#
+
+import os
+import copy
+from setuptools import setup
+import torch
+from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
+
+
+
+utility_dir = "${UTILITY_LIBRARY_DIRS}"
+ops_dir = "${OPS_DIR}"
+
+include_dirs = [ops_dir]
+lib_dirs = [utility_dir]
+libs = ['utility']
+
+
+import sysconfig
+
+# 添加Python库路径
+python_lib = sysconfig.get_config_var('LIBDIR')
+python_version = sysconfig.get_config_var('LDVERSION')
+if python_lib and python_version:
+    lib_dirs.append(python_lib)
+    libs.append(f'python{python_version}')
+
+
+tokens = str(torch.__version__).split('.')
+torch_major_version = "-DTORCH_MAJOR_VERSION=%d" % (int(tokens[0]))
+torch_minor_version = "-DTORCH_MINOR_VERSION=%d" % (int(tokens[1]))
+
+def add_prefix(filename):
+    return os.path.join('${CMAKE_CURRENT_SOURCE_DIR}/src', filename)
+
+modules = []
+is_rocm_pytorch = False
+try:
+    from torch.utils.cpp_extension import ROCM_HOME
+    is_rocm_pytorch = True if ((torch.version.hip is not None) and (ROCM_HOME is not None)) else False
+except ImportError:
+    pass
+
+
+
+modules.extend([
+    CppExtension('dct_cpp',
+        [
+            add_prefix('dct.cpp'),
+            add_prefix('dst.cpp'),
+            add_prefix('dxt.cpp'),
+            add_prefix('dct_2N.cpp')
+            ],
+        include_dirs=copy.deepcopy(include_dirs),
+        library_dirs=copy.deepcopy(lib_dirs),
+        libraries=copy.deepcopy(libs),
+        extra_compile_args={
+                    'cxx' : [torch_major_version, torch_minor_version, '-fopenmp']
+                    }),
+    CppExtension('dct_lee_cpp',
+        [
+            add_prefix('dct_lee.cpp')
+            ],
+        include_dirs=copy.deepcopy(include_dirs),
+        library_dirs=copy.deepcopy(lib_dirs),
+        libraries=copy.deepcopy(libs),
+        extra_compile_args={
+                    'cxx' : [torch_major_version, torch_minor_version, '-fopenmp']
+                    }),
+            ])
+
+if is_rocm_pytorch == True:
+    modules.extend([
+            CUDAExtension('dct_hip',
+                [
+                    add_prefix('dct_hip.cpp'),
+                    add_prefix('dct_hip_kernel.hip'),
+                    add_prefix('dst_hip.cpp'),
+                    add_prefix('dst_hip_kernel.hip'),
+                    add_prefix('dxt_hip.cpp'),
+                    add_prefix('dct_2N_hip.cpp')
+                    ],
+                include_dirs=copy.deepcopy(include_dirs),
+                library_dirs=copy.deepcopy(lib_dirs),
+                libraries=copy.deepcopy(libs),
+                extra_compile_args={
+                    'cxx' : [torch_major_version, torch_minor_version],
+                    'hipcc': ['-fgpu-rdc']
+                    },
+                    runtime_library_dirs=[python_lib] if python_lib else []
+                    ),
+            CUDAExtension('dct_lee_hip',
+                [
+                    add_prefix('dct_lee_hip.cpp'),
+                    add_prefix('dct_lee_hip_kernel.hip'),
+                    add_prefix('dct_hip_kernel.hip'),
+                    add_prefix('dst_hip_kernel.hip')
+                    ],
+                include_dirs=copy.deepcopy(include_dirs),
+                library_dirs=copy.deepcopy(lib_dirs),
+                libraries=copy.deepcopy(libs),
+                extra_compile_args={
+                    'cxx' : [torch_major_version, torch_minor_version],
+                    'hipcc': ['-fgpu-rdc']
+                    },
+                    runtime_library_dirs=[python_lib] if python_lib else []
+                    ),
+        ])
+
+setup(
+        name='dct',
+        ext_modules=modules,
+        cmdclass={
+            'build_ext': BuildExtension
+            })
